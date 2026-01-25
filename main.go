@@ -136,9 +136,9 @@ func main() {
 		}
 	})
 
-	fmt.Println("Mendengarkan di Localhost pada port 2323")
+	fmt.Println("Mendengarkan di Localhost pada port 8080")
 
-	err := http.ListenAndServe(":2323", nil)
+	err := http.ListenAndServe(":8080", nil)
 	if err != nil {
 		fmt.Println("Gagl menjalankan api server")
 	}
