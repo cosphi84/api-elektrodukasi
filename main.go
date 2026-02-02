@@ -1,145 +1,71 @@
 package main
 
 import (
-	"encoding/json"
+	"api-elektrodukasi/database"
+	"api-elektrodukasi/handlers"
+	"api-elektrodukasi/repositories"
+	"api-elektrodukasi/services"
 	"fmt"
+	"log"
 	"net/http"
-	"strconv"
-	"strings"
+
+	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
-type categories struct {
-	ID          int    `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+type Config struct {
+	Port   string `mapstructure:"PORT"`
+	DBConn string `mapstructure:"DB_CONN"`
 }
 
-var cats = []categories{
-	{ID: 1, Name: "Teori Dasar", Description: "Kumpulan artikel seputar teori dasar elektronika."},
-	{ID: 2, Name: "Teknik Digital", Description: "Kumpulan artikel seputar teknik digital."},
-	{ID: 3, Name: "Microcontroller", Description: "Kumpulan artikel seputar pemrograman microcontroller."},
-}
+func loadConfig() *Config {
+	// 1️⃣ load .env ke environment (DEV only)
+	_ = godotenv.Load()
 
-func getCategoryByID(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/categories/")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		http.Error(w, "Invalid Category ID", http.StatusBadRequest)
+	// 2️⃣ viper baca dari ENV
+	viper.AutomaticEnv()
+
+	cfg := &Config{
+		Port:   viper.GetString("PORT"),
+		DBConn: viper.GetString("DB_CONN"),
 	}
 
-	for _, cat := range cats {
-		if cat.ID == id {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cat)
-			return
-		}
+	// 3️⃣ validasi
+	if cfg.Port == "" {
+		log.Fatal("PORT is required")
+	}
+	if cfg.DBConn == "" {
+		log.Fatal("DB_CONN is required")
 	}
 
-	http.Error(w, "Category not found", http.StatusNotFound)
-}
-
-func updateCategoryByID(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/categories/")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		http.Error(w, "Invalid Category ID", http.StatusBadRequest)
-		return
-	}
-
-	var CatToUpdate categories
-	err = json.NewDecoder(r.Body).Decode(&CatToUpdate)
-	if err != nil {
-		http.Error(w, "Invalid JSON Data", http.StatusBadRequest)
-		return
-	}
-
-	for i := range cats {
-		if cats[i].ID == id {
-			CatToUpdate.ID = id
-			cats[i] = CatToUpdate
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cats[i])
-			return
-		}
-	}
-
-	http.Error(w, "Category not found", http.StatusNotFound)
-}
-
-func deleteCategoryByID(w http.ResponseWriter, r *http.Request) {
-	idStr := strings.TrimPrefix(r.URL.Path, "/categories/")
-	id, err := strconv.Atoi(idStr)
-
-	if err != nil {
-		http.Error(w, "Invalid Category ID", http.StatusBadRequest)
-		return
-	}
-
-	for i, p := range cats {
-		if p.ID == id {
-			cats = append(cats[:i], cats[i+1:]...)
-
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{
-				"message": "Category deleted",
-			})
-			return
-		}
-	}
-
-	http.Error(w, "Category not found", http.StatusNotFound)
+	return cfg
 }
 
 func main() {
-	// localhost:2323/
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
-			"status":  "OK",
-			"message": "API Elektrodukasi V1.0.0",
-		})
-	})
+	cfg := loadConfig()
 
-	// Get all Categories dan POST new kategori
-	http.HandleFunc("/categories", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(cats)
-		} else if r.Method == "POST" {
-			w.Header().Set("Content-Type", "application/json")
-			var category categories
-			err := json.NewDecoder(r.Body).Decode(&category)
-			if err != nil {
-				http.Error(w, "Invalid Request", http.StatusBadRequest)
-			}
+	addr := "0.0.0.0:" + cfg.Port
 
-			category.ID = len(cats) + 1
-			cats = append(cats, category)
-			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(category)
-		} else {
-			w.Header().Set("Content-Type", "application/json")
-			http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
-			return
-		}
-	})
-
-	// Get 1 Kategori, update, atau delete
-	http.HandleFunc("/categories/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" {
-			getCategoryByID(w, r)
-		} else if r.Method == "PUT" {
-			updateCategoryByID(w, r)
-		} else if r.Method == "DELETE" {
-			deleteCategoryByID(w, r)
-		}
-	})
-
-	fmt.Println("Mendengarkan di Localhost pada port 8080")
-
-	err := http.ListenAndServe(":8080", nil)
+	// Database connection
+	db, err := database.InitDB(cfg.DBConn)
 	if err != nil {
-		fmt.Println("Gagl menjalankan api server")
+		log.Fatal("Failed to initialize Database: ", err)
+	}
+	defer db.Close()
+
+	// Dependency Injection
+	CategoryRepo := repositories.NewCategoryRepository(db)
+	CategoryService := services.NewCategoryService(CategoryRepo)
+	CategoryHandler := handlers.NewCategoryHandler(CategoryService)
+
+	// Route Handler
+	http.HandleFunc("/categories", CategoryHandler.HandleCategory)
+	http.HandleFunc("/categories/", CategoryHandler.HandleCategoryByID)
+
+	// some text
+	fmt.Println("Listening on ", addr)
+	err = http.ListenAndServe(addr, nil)
+	if err != nil {
+		fmt.Println("Server Run Failed: ", err)
 	}
 }
