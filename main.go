@@ -5,6 +5,7 @@ import (
 	"api-elektrodukasi/handlers"
 	"api-elektrodukasi/repositories"
 	"api-elektrodukasi/services"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,6 +17,11 @@ import (
 type Config struct {
 	Port   string `mapstructure:"PORT"`
 	DBConn string `mapstructure:"DB_CONN"`
+}
+
+type AppInfo struct {
+	Name string `json:"name"`
+	Ver  string `json:"ver"`
 }
 
 func loadConfig() *Config {
@@ -59,6 +65,21 @@ func main() {
 	CategoryHandler := handlers.NewCategoryHandler(CategoryService)
 
 	// Route Handler
+	http.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/" {
+			http.NotFound(writer, request)
+			return
+		}
+
+		if request.Method != http.MethodGet {
+			http.Error(writer, "Invalid method", http.StatusMethodNotAllowed)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(writer).Encode(AppInfo{Name: "API Elektrodukasi", Ver: "1.0.1"})
+	})
+	
 	http.HandleFunc("/categories", CategoryHandler.HandleCategory)
 	http.HandleFunc("/categories/", CategoryHandler.HandleCategoryByID)
 
